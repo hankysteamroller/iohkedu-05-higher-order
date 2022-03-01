@@ -2,7 +2,7 @@
 module HigherOrder where
 
 import           Data.List (foldl', sortBy)
-import           Prelude   hiding (all, product, reverse, take)
+import           Prelude   hiding (Monad (..), all, product, reverse, take)
 
 
 -- These are binary trees with labels in their nodes.
@@ -316,3 +316,266 @@ foldrBinTree f acc t = foldr f acc $ toList t
     toList Empty       = []
     toList (Bin l x r) = toList l ++ [x] ++ toList r
 
+-- Task HigherOrder-XX.
+--
+-- We want to attach unique numbers to each node in a binary
+-- tree, so that all the numbers from left to right are labelled
+-- in ascending order.
+--
+-- NOTE: This is not easy. Think about this and discuss your
+-- strategy with us before you proceed.
+
+-- |
+-- >>> labelTree $ Bin Empty 'x' (Bin Empty 'y' Empty)
+-- Bin Empty ('x',1) (Bin Empty ('y',2) Empty)
+--
+-- >>> labelTree $ Bin (Bin Empty 1 Empty) 2 (Bin Empty 5 Empty)
+-- Bin (Bin Empty (1,1) Empty) (2,2) (Bin Empty (5,3) Empty)
+
+-- Step 1: Switch the order of params in "go" to enable "WithCounter"
+
+-- labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+-- labelTreeWithCounter t = snd $ go t 0
+--   where
+--     go :: BinTree a -> Int -> (Int, BinTree (a, Int))
+--     go Empty n = (n, Empty)
+--     go (Bin l x r) n =
+--       let
+--         (n', l') = go l n
+--         n'' = n' + 1
+--         (n''', r') = go r n''
+--       in
+--         (n''', Bin l' (x, n'') r')
+
+-- Step 2: Define WithCounter, use it in "go", define "tick" WithCounter and move Empty-case to end
+
+-- type WithCounter a = Int -> (Int, a)
+
+-- labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+-- labelTreeWithCounter t = snd $ go t 0
+--   where
+--     go :: BinTree a -> WithCounter (BinTree (a, Int))
+--     go (Bin l x r) n =
+--       let
+--         (n', l') = go l n
+--         (n'', _) = tick n'
+--         (n''', r') = go r n''
+--       in
+--         (n''', Bin l' (x, n'') r')
+
+--     go Empty n = (n, Empty)
+
+--     tick :: WithCounter Int
+--     tick counter = (counter + 1, counter)
+
+-- Step 3: Rewrite with case-of to make the repeating structure visible
+
+-- type WithCounter a = Int -> (Int, a)
+
+-- labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+-- labelTreeWithCounter t = snd $ go t 0
+--   where
+--     go :: BinTree a -> WithCounter (BinTree (a, Int))
+--     go (Bin l x r) n =
+--       case go l n of
+--         (n', l') ->
+--           let
+--             (n'', _) = tick n'
+--           in
+--             case go r n'' of
+--               (n''', r') ->
+--                 (n''', Bin l' (x, n'') r')
+
+--     go Empty n = (n, Empty)
+
+--     tick :: WithCounter Int
+--     tick counter = (counter + 1, counter)
+
+-- Step 4: Make a newtype wrapper to enforce type safety
+
+-- newtype WithCounter a = MkWithCounter (Int -> (Int, a))
+
+-- labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+-- labelTreeWithCounter t = snd $ (runWithCounter (go t)) 0
+--   where
+--     go :: BinTree a -> WithCounter (BinTree (a, Int))
+--     go (Bin l x r) =
+--       MkWithCounter (\ n ->
+--         case (runWithCounter (go l)) n of
+--           (n', l') ->
+--             let
+--               (n'', _) = (runWithCounter tick) n'
+--             in
+--               case (runWithCounter (go r)) n'' of
+--                 (n''', r') ->
+--                   (n''', Bin l' (x, n'') r')
+--       )
+--     go Empty = MkWithCounter (\ n -> (n, Empty))
+
+--     tick :: WithCounter Int
+--     tick = MkWithCounter (\ counter -> (counter + 1, counter))
+
+-- runWithCounter :: WithCounter a -> (Int -> (Int, a))
+-- runWithCounter (MkWithCounter f) = f
+
+-- Step 5: Use records in newtype wrapper
+
+-- newtype WithCounter a = MkWithCounter { runWithCounter :: (Int -> (Int, a)) }
+
+-- labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+-- labelTreeWithCounter t = snd $ (runWithCounter (go t)) 0
+--   where
+--     go :: BinTree a -> WithCounter (BinTree (a, Int))
+--     go (Bin l x r) =
+--       MkWithCounter (\ n ->
+--         case (runWithCounter (go l)) n of
+--           (n', l') ->
+--             let
+--               (n'', _) = (runWithCounter tick) n'
+--             in
+--               case (runWithCounter (go r)) n'' of
+--                 (n''', r') ->
+--                   (n''', Bin l' (x, n'') r')
+--       )
+--     go Empty = MkWithCounter (\ n -> (n, Empty))
+
+--     tick :: WithCounter Int
+--     tick = MkWithCounter (\ counter -> (counter + 1, counter))
+
+-- Step 6: tick with case-of syntax
+
+-- newtype WithCounter a = MkWithCounter { runWithCounter :: (Int -> (Int, a)) }
+
+-- labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+-- labelTreeWithCounter t = snd $ (runWithCounter (go t)) 0
+--   where
+--     go :: BinTree a -> WithCounter (BinTree (a, Int))
+--     go (Bin l x r) =
+--       MkWithCounter (\ n ->
+--         case (runWithCounter (go l)) n of
+--           (n', l') ->
+--             case (runWithCounter tick) n' of
+--               (n'', _) ->
+--                 case (runWithCounter (go r)) n'' of
+--                   (n''', r') ->
+--                     (n''', Bin l' (x, n'') r')
+--       )
+--     go Empty = MkWithCounter (\ n -> (n, Empty))
+
+--     tick :: WithCounter Int
+--     tick = MkWithCounter (\ counter -> (counter + 1, counter))
+
+-- Step 7: Approximate the repeating pattern as function
+
+-- function computation continuation =
+--   MkWithCounter (\ currentCounter ->
+--   case runWithCounter computation currentCounter of
+--     (nextCounter, result) -> runWithCounter (continuation result) nextCounter
+--   )
+
+-- Step 8: Recognize the repeating pattern as bind
+
+-- bindWithCounter :: WithCounter a -> (a -> WithCounter b) -> WithCounter b
+-- bindWithCounter computation continuation =
+--   MkWithCounter (\ currentCounter ->
+--   case runWithCounter computation currentCounter of
+--     (nextCounter, result) -> runWithCounter (continuation result) nextCounter
+--   )
+
+-- Step 9: Refactor using bindWithCounter on one level
+
+-- newtype WithCounter a = MkWithCounter { runWithCounter :: (Int -> (Int, a)) }
+
+-- bindWithCounter :: WithCounter a -> (a -> WithCounter b) -> WithCounter b
+-- bindWithCounter computation continuation =
+--   MkWithCounter (\ currentCounter ->
+--   case runWithCounter computation currentCounter of
+--     (nextCounter, result) -> runWithCounter (continuation result) nextCounter
+--   )
+
+-- returnWithCounter :: a -> WithCounter a
+-- returnWithCounter x = MkWithCounter (\ currentCounter -> (currentCounter, x))
+
+-- labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+-- labelTreeWithCounter t = snd $ (runWithCounter (go t)) 0
+--   where
+--     go :: BinTree a -> WithCounter (BinTree (a, Int))
+--     go (Bin l x r) =
+--       go l `bindWithCounter` \ l' ->
+--       MkWithCounter (\ n' ->
+--         case (runWithCounter tick) n' of
+--           (n'', _) ->
+--             case (runWithCounter (go r)) n'' of
+--               (n''', r') ->
+--                 (n''', Bin l' (x, n'') r')
+--       )
+--     go Empty = returnWithCounter Empty
+
+--     tick :: WithCounter Int
+--     tick = MkWithCounter (\ counter -> (counter + 1, counter))
+
+-- Step 10: Refactor rest using bindWithCounter
+
+-- newtype WithCounter a = MkWithCounter { runWithCounter :: (Int -> (Int, a)) }
+
+-- bindWithCounter :: WithCounter a -> (a -> WithCounter b) -> WithCounter b
+-- bindWithCounter computation continuation =
+--   MkWithCounter (\ currentCounter ->
+--   case runWithCounter computation currentCounter of
+--     (nextCounter, result) -> runWithCounter (continuation result) nextCounter
+--   )
+
+-- returnWithCounter :: a -> WithCounter a
+-- returnWithCounter x = MkWithCounter (\ currentCounter -> (currentCounter, x))
+
+-- labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+-- labelTreeWithCounter t = snd $ (runWithCounter (go t)) 1
+--   where
+--     go :: BinTree a -> WithCounter (BinTree (a, Int))
+--     go (Bin l x r) =
+--       go l `bindWithCounter` \ l' ->
+--       tick `bindWithCounter` \ label ->
+--       go r `bindWithCounter` \ r' ->
+--       returnWithCounter (Bin l' (x, label) r')
+
+--     go Empty = returnWithCounter Empty
+
+--     tick :: WithCounter Int
+--     tick = MkWithCounter (\ counter -> (counter + 1, counter))
+
+-- Step 11: Define own monad and rename using monadic operations
+
+newtype WithCounter a = MkWithCounter { runWithCounter :: (Int -> (Int, a)) }
+
+bindWithCounter :: WithCounter a -> (a -> WithCounter b) -> WithCounter b
+bindWithCounter computation continuation =
+  MkWithCounter (\ currentCounter ->
+  case runWithCounter computation currentCounter of
+    (nextCounter, result) -> runWithCounter (continuation result) nextCounter
+  )
+
+returnWithCounter :: a -> WithCounter a
+returnWithCounter x = MkWithCounter (\ currentCounter -> (currentCounter, x))
+
+class Monad m where
+  return :: a -> m a
+  (>>=) :: m a -> (a -> m b) -> m b
+
+instance Monad WithCounter where
+  return = returnWithCounter
+  (>>=) = bindWithCounter
+
+labelTreeWithCounter :: BinTree a -> BinTree (a, Int)
+labelTreeWithCounter t = snd $ (runWithCounter (go t)) 1
+  where
+    go :: BinTree a -> WithCounter (BinTree (a, Int))
+    go (Bin l x r) =
+      go l >>= \ l' ->
+      tick >>= \ label ->
+      go r >>= \ r' ->
+      return (Bin l' (x, label) r')
+
+    go Empty = returnWithCounter Empty
+
+    tick :: WithCounter Int
+    tick = MkWithCounter (\ counter -> (counter + 1, counter))
